@@ -1,0 +1,130 @@
+---
+title: "Correlation of Omitted Variable and Regressor"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Motivation
+
+This project is motivated by a discussion at work.  In econometrics class, the omitted variable problem is usually treated in the context of how the omitted variable biases the estimate of the treatment variable.  In the industry context, we normally deal with problems that arise in the context of the prediciton accuracy.  Therefore, omitted variable bias is more often than not discussed in the context of the bias in the estimates, while omitted variable bias is seldom discussed in the context of the prediction accuracy.
+
+## Omitted Variable Bias
+
+The key results in the econometrics textbook can be applied from a different aspect.
+
+Let the true model be:
+
+$y = X \beta + Z \gamma + \epsilon$
+
+and we run a regression of
+
+$y = X \beta + u$
+
+This is a standard omitted variable setup.
+
+The well-known result derived from this setup is:
+
+$b = \beta + (X'X)^{-1}(X'Z \gamma) + (X'X)^{-1} X' \epsilon$
+
+$E(b|X, Z) = \beta + E[x_i x_i']^{-1} E(x_i z_i') \gamma$
+
+When $z_i$ is a scalar, the bias of $b$ is $cov(x_i, z_i) /var(x_i)$.
+
+This result says that the higher the correlation between $Z$ and $X$, the larger the bias of $b$. And the more important $Z$ is in the true regression, the more biased is $b$.
+
+## Prediction Accuracy
+
+Another well-known result is that when we look at the residual sum of squares:
+
+The residuals of the true model are defined as 
+
+$u = y -Xb_0 - Zr_0$; 
+
+the residuals of the model omitting $Z$ are defined as 
+
+$e = y - Xb$:
+
+$e'e = u'u + r_0^2 z*' z*$
+
+where 
+
+$z* = M_x z = z - X (X'X) ^{-1} X'z$, 
+
+that is, the residuals from regressing $z$ against $X$.  Two factors play a role in this theorem:
+
+(1) The magnitude of $\gamma$ in the true model: The more influential $z$ is on $y$, the larger the extent to which the "wrong" model deteriotes from the true model.
+
+(2) The correlation between $z$ and $X$: The larger the correlation between $z$ and $X$, the smaller $z*' z*$ is; and, therefore, the smaller the extent to which the "wrong" model deteriorates from the true model.  
+
+## Monte Carlo Simulation
+I set up a Monte Carlo simulation to confirm our theoretical derivation.  Let the truth be:
+
+$y_i = 1 + (-2) \cdot x_i + r_1 \cdot z_i + \epsilon_i,$
+
+where $x_i$ and $z_i$ are bivariate normal with zero mean, unit variance, and correlation of $\rho$.
+
+I then vary the values for $\rho$ and $r_1$.
+
+```{r mc-sim, echo=T}
+set.seed(42)
+n = 100 # sample size
+sim = 50 # number of simulations
+# ==============
+mu_x <- 1
+sigma_x <- 1
+mu_z <- 1
+sigma_z <- 1
+# ==============
+b0 <- 1
+b1 <- -2
+# ==============
+rho_list <- seq(-0.9, 0.9,0.1)
+r1_list <- c(-3, -2, -1, 0, 1, 2, 3)
+out <- NULL
+for(rho in rho_list) {
+    for(r1 in r1_list) {
+        bias <- numeric(sim) # bias based on empirical data
+        rmse <- numeric(sim) # rmse by true model
+        rmse_ov <- numeric(sim) # rmse without z
+        for(i in 1:sim){
+             x <- rnorm(n, mu_x, sigma_x)
+             z <- rnorm(n, mu_z + sigma_z/sigma_x * rho *(x - mu_x), sqrt((1- rho^2) * sigma_z^2))
+             y <- rnorm(n, b0 + b1 * x + r1 * z, 1)
+             fit <- lm(y ~ x)
+             true <- lm(y ~ x + z)
+             bias[i] <- coef(fit)['x'] - b1
+             rmse[i] <- sqrt(mean((y - fitted(true))^2))
+             rmse_ov[i] <- sqrt(mean((y - fitted(fit))^2))
+        } 
+        res <- data.frame(rho = rho, r1 = r1, bias = mean(bias), rmse_diff = mean(rmse_ov - rmse))
+        out <- rbind(out, res)
+    }
+}
+```
+
+The following grpahic confirms that the larger the correlation the larger the bias; and the more important a role $Z$ plays in the true regression, the larger the bias.
+
+```{r fig.width = 6, fig.height = 4}
+ggplot(out, aes(x = rho, y = r1, fill = abs(bias))) + geom_tile() + 
+    scale_fill_gradient(low = "#00a0dc", high = "#e68523") + theme(
+    panel.background = element_blank()
+)
+```
+
+The following graphic shows that given the value of $r_1$, the larger the correlation, the smaller the difference is the root mean squared error of the wrong model from the true model.  On the other hand, given the value of $\rho$, the smaller $r_1$ is, the smaller the deterioration in performance of the wrong model.
+
+```{r fig.width = 6, fig.height = 4}
+ggplot(out, aes(x = rho, y = r1, fill = rmse_diff)) + geom_tile() + 
+    scale_fill_gradient(low = "#00a0dc", high = "#e68523") + theme(
+    panel.background = element_blank()
+)
+```
+
+## Concluding Remarks
+
+This result is somewhat surpirsing at the first sight.  When $\rho$ and $r_1$ are more correlated, $b$ of the model without $Z$ is more biased, but the model performance in terms of prediction accuracy deteriorates less.
+
+However, the results make sense when you think about it.  When $X$ and $Z$ are highly correlated, the coefficient of $X$, $b$, will pick up more influence of $Z$ and, therefore, is more biased.  However, since $b$ picks up more influence of $Z$, the predictions are closer to the one using the true model and, therefore, the RMSE deteriorates less.
